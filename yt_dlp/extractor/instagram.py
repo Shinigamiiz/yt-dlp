@@ -66,44 +66,68 @@ class InstagramBaseIE(InfoExtractor):
 
     def _extract_nodes(self, nodes, is_direct=False):
         for idx, node in enumerate(nodes, start=1):
-            if node.get('__typename') != 'GraphVideo' and node.get('is_video') is not True:
-                continue
+            is_video = node.get('__typename') == 'GraphVideo' or node.get('is_video') is True
+            is_image = node.get('__typename') == 'GraphImage' or node.get('is_video') is False
 
-            video_id = node.get('shortcode')
+            # Process videos
+            if is_video:
+                video_id = node.get('shortcode')
 
-            if is_direct:
-                info = {
-                    'id': video_id or node['id'],
-                    'url': node.get('video_url'),
-                    'width': self._get_dimension('width', node),
-                    'height': self._get_dimension('height', node),
+                if is_direct:
+                    info = {
+                        'id': video_id or node['id'],
+                        'url': node.get('video_url'),
+                        'width': self._get_dimension('width', node),
+                        'height': self._get_dimension('height', node),
+                        'http_headers': {
+                            'Referer': 'https://www.instagram.com/',
+                        },
+                    }
+                elif not video_id:
+                    continue
+                else:
+                    info = {
+                        '_type': 'url',
+                        'ie_key': 'Instagram',
+                        'id': video_id,
+                        'url': f'https://instagram.com/p/{video_id}',
+                    }
+
+                yield {
+                    **info,
+                    'title': node.get('title') or (f'Video {idx}' if is_direct else None),
+                    'description': traverse_obj(
+                        node, ('edge_media_to_caption', 'edges', 0, 'node', 'text'), expected_type=str),
+                    'thumbnail': traverse_obj(
+                        node, 'display_url', 'thumbnail_src', 'display_src', expected_type=url_or_none),
+                    'duration': float_or_none(node.get('video_duration')),
+                    'timestamp': int_or_none(node.get('taken_at_timestamp')),
+                    'view_count': int_or_none(node.get('video_view_count')),
+                    'comment_count': self._get_count(node, 'comments', 'preview_comment', 'to_comment', 'to_parent_comment'),
+                    'like_count': self._get_count(node, 'likes', 'preview_like'),
+                }
+
+            # Process images
+            elif is_image:
+                image_id = node.get('shortcode')
+                if not image_id:
+                    continue
+
+                yield {
+                    'id': image_id,
+                    'url': traverse_obj(node, 'display_url', 'thumbnail_src', 'display_src', expected_type=url_or_none),
+                    'title': node.get('title') or f'Image {idx}',
+                    'description': traverse_obj(
+                        node, ('edge_media_to_caption', 'edges', 0, 'node', 'text'), expected_type=str),
+                    'thumbnail': traverse_obj(
+                        node, 'display_url', 'thumbnail_src', 'display_src', expected_type=url_or_none),
+                    'timestamp': int_or_none(node.get('taken_at_timestamp')),
+                    'like_count': self._get_count(node, 'likes', 'preview_like'),
+                    'comment_count': self._get_count(node, 'comments', 'preview_comment', 'to_comment', 'to_parent_comment'),
                     'http_headers': {
                         'Referer': 'https://www.instagram.com/',
                     },
                 }
-            elif not video_id:
-                continue
-            else:
-                info = {
-                    '_type': 'url',
-                    'ie_key': 'Instagram',
-                    'id': video_id,
-                    'url': f'https://instagram.com/p/{video_id}',
-                }
-
-            yield {
-                **info,
-                'title': node.get('title') or (f'Video {idx}' if is_direct else None),
-                'description': traverse_obj(
-                    node, ('edge_media_to_caption', 'edges', 0, 'node', 'text'), expected_type=str),
-                'thumbnail': traverse_obj(
-                    node, 'display_url', 'thumbnail_src', 'display_src', expected_type=url_or_none),
-                'duration': float_or_none(node.get('video_duration')),
-                'timestamp': int_or_none(node.get('taken_at_timestamp')),
-                'view_count': int_or_none(node.get('video_view_count')),
-                'comment_count': self._get_count(node, 'comments', 'preview_comment', 'to_comment', 'to_parent_comment'),
-                'like_count': self._get_count(node, 'likes', 'preview_like'),
-            }
 
     def _extract_product_media(self, product_media):
         media_id = product_media.get('code') or _pk_to_id(product_media.get('pk'))
